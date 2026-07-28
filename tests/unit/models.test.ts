@@ -3,6 +3,12 @@
  * `mu-sdk-python/tests/unit/test_models.py` test-for-test.
  */
 import { describe, expect, it } from "vitest";
+import {
+  askRequestSchema,
+  askResultSchema,
+  consolidateRequestSchema,
+  consolidateResultSchema,
+} from "../../src/models/consolidate.js";
 import { contextIndexListViewSchema } from "../../src/models/context.js";
 import {
   memoryCreateRequestSchema,
@@ -186,5 +192,56 @@ describe("ContextIndexListView", () => {
       generated_at: new Date().toISOString(),
     });
     expect(view.indexes).toEqual([]);
+  });
+});
+
+describe("ConsolidateRequest", () => {
+  it("defaults limit to 50", () => {
+    const request = consolidateRequestSchema.parse({});
+    expect(request.limit).toBe(50);
+  });
+
+  it("rejects unknown fields", () => {
+    expect(() => consolidateRequestSchema.parse({ limit: 10, unknown_field: "boom" })).toThrow();
+  });
+
+  it("rejects a limit outside [1, 500]", () => {
+    expect(() => consolidateRequestSchema.parse({ limit: 0 })).toThrow();
+    expect(() => consolidateRequestSchema.parse({ limit: 501 })).toThrow();
+  });
+});
+
+describe("ConsolidateResult", () => {
+  it("carries genuine engine counts", () => {
+    // the MemGC/Phi headline: invalidate-don't-delete SUPERSESSION
+    const result = consolidateResultSchema.parse({
+      facts_extracted: 2,
+      added: 1,
+      superseded: 1,
+      generated_at: new Date().toISOString(),
+    });
+    expect(result.superseded).toBe(1);
+  });
+});
+
+describe("AskRequest", () => {
+  it("rejects an empty question", () => {
+    expect(() => askRequestSchema.parse({ question: "" })).toThrow();
+  });
+
+  it("defaults limit to 10", () => {
+    const request = askRequestSchema.parse({ question: "Where does Ada work?" });
+    expect(request.limit).toBe(10);
+  });
+});
+
+describe("AskResult", () => {
+  it("carries the synthesized answer", () => {
+    const result = askResultSchema.parse({
+      question: "Where does Ada work?",
+      answer: "Acme",
+      generated_at: new Date().toISOString(),
+    });
+    expect(result.answer).toBe("Acme");
   });
 });

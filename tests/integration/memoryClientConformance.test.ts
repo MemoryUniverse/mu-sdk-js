@@ -215,4 +215,128 @@ describe("MemoryClient conformance (real Python server)", () => {
       await client.close();
     }
   });
+
+  // ---- consolidate / ask / tier-scoped recall (net-new this phase) ---------------------------
+  // Mirrors mu-sdk-python/tests/integration/test_memory_client_conformance.py test-for-test —
+  // the SAME conformance server (real uvicorn, real TCP), proving cross-language wire parity.
+
+  // NOTE on vocabulary: the conformance server's tenant state (`_memories`/`_facts`/
+  // `_consolidated_ids`) is keyed by (workspace, namespace, user) — NOT session (see
+  // `conformance_server/app.py::resolve_identity`'s `tenant_key`) — and this file runs every
+  // `it()` against the SAME long-lived server instance (one `beforeAll`, not one-per-test as the
+  // Python integration suite does). Every test below therefore uses subject/predicate/content
+  // vocabulary that never repeats across tests in this file (same discipline the pre-existing
+  // tests already follow: "oranges" vs "grapefruit" vs "paris"/"tokyo") so consolidate's
+  // (subject, predicate) fact table and recall's content search never cross-pollute between
+  // tests sharing this one server.
+
+  it("consolidate extracts facts and reports real counts", async () => {
+    const client = new MemoryClient({ settings: settingsFor("session-13") });
+    try {
+      await client.add("Elan uses FalkorDB", {
+        subject: "Elan",
+        predicate: "uses",
+        object: "FalkorDB",
+      });
+      await client.add("Mira uses Postgres", {
+        subject: "Mira",
+        predicate: "uses",
+        object: "Postgres",
+      });
+
+      const report = await client.consolidate();
+
+      expect(report.facts_extracted).toBe(2);
+      expect(report.added).toBe(2);
+      expect(report.superseded).toBe(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("consolidate supersedes a conflicting fact — invalidate-don't-delete (MemGC/Phi headline)", async () => {
+    const client = new MemoryClient({ settings: settingsFor("session-14") });
+    try {
+      await client.add("Kavi hosts on FalkorDB", {
+        subject: "Kavi",
+        predicate: "hosts_on",
+        object: "FalkorDB",
+      });
+      const first = await client.consolidate();
+      expect(first.added).toBe(1);
+      expect(first.superseded).toBe(0);
+
+      await client.add("Kavi switched to Neo4j", {
+        subject: "Kavi",
+        predicate: "hosts_on",
+        object: "Neo4j",
+      });
+      const second = await client.consolidate();
+      expect(second.facts_extracted).toBe(1);
+      expect(second.added).toBe(1);
+      expect(second.superseded).toBe(1); // the FalkorDB fact must be reported as superseded
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("ask synthesizes an answer from the CURRENT consolidated fact only (contrast with recall)", async () => {
+    const client = new MemoryClient({ settings: settingsFor("session-15") });
+    try {
+      await client.add("Talia prefers FalkorDB", {
+        subject: "Talia",
+        predicate: "prefers",
+        object: "FalkorDB",
+      });
+      await client.consolidate();
+      await client.add("Talia switched to Neo4j", {
+        subject: "Talia",
+        predicate: "prefers",
+        object: "Neo4j",
+      });
+      await client.consolidate();
+
+      const result = await client.ask("What does Talia prefer?");
+
+      expect(result.answer).toContain("Neo4j");
+      expect(result.answer).not.toContain("FalkorDB");
+      expect(result.question).toBe("What does Talia prefer?");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("recall(text, {tier}) narrows to exactly one channel end-to-end", async () => {
+    const client = new MemoryClient({ settings: settingsFor("session-16") });
+    try {
+      await client.add("sprocket in stm", { tier: "stm" });
+      await client.add("sprocket in ltm", { tier: "ltm" });
+
+      const stmOnly = await client.recall("sprocket", { tier: "stm" });
+      expect(stmOnly.items).toHaveLength(1);
+      expect(stmOnly.items[0]?.tier).toBe("stm");
+      expect(stmOnly.channels_run.stm).toBe(true);
+      expect(stmOnly.channels_run.mtm).toBe(false);
+      expect(stmOnly.channels_run.ltm).toBe(false);
+
+      const ltmOnly = await client.recall("sprocket", { tier: "ltm" });
+      expect(ltmOnly.items).toHaveLength(1);
+      expect(ltmOnly.items[0]?.tier).toBe("ltm");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("recall without a tier option is unchanged — backward-compat guard", async () => {
+    const client = new MemoryClient({ settings: settingsFor("session-17") });
+    try {
+      await client.add("cogwheel in stm", { tier: "stm" });
+      await client.add("cogwheel in ltm", { tier: "ltm" });
+
+      const result = await client.recall("cogwheel");
+      expect(result.items).toHaveLength(2);
+    } finally {
+      await client.close();
+    }
+  });
 });

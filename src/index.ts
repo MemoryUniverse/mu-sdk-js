@@ -1,10 +1,10 @@
 /**
  * mu-sdk — the Memory Universe JavaScript/TypeScript developer SDK.
  *
- * A THIN async wire client (`MemoryClient`): add / search / recall / context, talking to
- * `mu-server`'s public surface ONLY over the versioned wire contract. No engine, no stores, no
- * strategies, no embedder — faithful mirror of `mu-sdk-python`'s public surface
- * (`mu-sdk-python/src/mu_sdk/__init__.py`).
+ * A THIN async wire client (`MemoryClient`): add / search / recall (tier-scoped) / consolidate /
+ * ask / context, talking to `mu-server`'s public surface ONLY over the versioned wire contract.
+ * No engine, no stores, no strategies, no embedder — faithful mirror of `mu-sdk-python`'s public
+ * surface (`mu-sdk-python/src/mu_sdk/__init__.py`).
  */
 
 export { ApiKeyAuth, BearerAuth, DemoHeaderAuth, type SdkAuth, resolveAuth } from "./auth.js";
@@ -29,6 +29,8 @@ export {
 } from "./errors.js";
 export {
   type AddOptions,
+  type AskOptions,
+  type ConsolidateOptions,
   type ContextApi,
   MemoryClient,
   type MemoryClientOptions,
@@ -36,6 +38,16 @@ export {
   type RequestSignalOption,
   type SearchOptions,
 } from "./client.js";
+export {
+  type AskRequest,
+  type AskResult,
+  type ConsolidateRequest,
+  type ConsolidateResult,
+  askRequestSchema,
+  askResultSchema,
+  consolidateRequestSchema,
+  consolidateResultSchema,
+} from "./models/consolidate.js";
 export {
   type ContextIndexListView,
   type ContextIndexView,

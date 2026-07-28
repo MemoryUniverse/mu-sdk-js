@@ -2,12 +2,14 @@
  * `MemoryClient` — the async wire client (mu-local-and-sdk-spec.md §2.3), a faithful mirror of
  * `mu-sdk-python/src/mu_sdk/client.py`.
  *
- * Exposes exactly the four verbs this phase's brief scopes: `add` (write), `search` (simple
- * ranked list, mem0 muscle-memory), `recall` (the MU-canonical rich multi-channel read), and
- * `.context` (the `ContextApi` sub-client's read-only `discover`). No engine algorithm, no store
- * adapter — every verb is one HTTP call through the `Transport` port, wrapped by the
- * retry/timeout/trace decorator stack (`./decorators.ts`), with a typed error thrown via
- * `./errorMapping.ts` on any non-2xx response.
+ * Exposes `add` (write), `search` (simple ranked list, mem0 muscle-memory), `recall` (the
+ * MU-canonical rich multi-channel read — now with an optional `tier` option for tier-SCOPED
+ * recall, net-new this phase), `consolidate` (MTM->LTM DISTILL: invalidate-don't-delete
+ * SUPERSESSION + bi-temporal SPO extraction, net-new this phase), `ask` (MU's own SLM-powered
+ * synthesis over recalled context, net-new this phase), and `.context` (the `ContextApi`
+ * sub-client's read-only `discover`). No engine algorithm, no store adapter — every verb is one
+ * HTTP call through the `Transport` port, wrapped by the retry/timeout/trace decorator stack
+ * (`./decorators.ts`), with a typed error thrown via `./errorMapping.ts` on any non-2xx response.
  *
  * Cancellation (DEV-STANDARDS rule 1, JS analogue): every public verb accepts an optional
  * `signal?: AbortSignal` — the caller's own cancellation token. It is threaded, untouched, through
@@ -19,6 +21,16 @@
 import { type SdkAuth, resolveAuth } from "./auth.js";
 import { type RequestFunc, withRetry, withTimeout, withTrace } from "./decorators.js";
 import { mapWireError } from "./errorMapping.js";
+import {
+  type AskRequest,
+  type AskResult,
+  type ConsolidateRequest,
+  type ConsolidateResult,
+  askRequestSchema,
+  askResultSchema,
+  consolidateRequestSchema,
+  consolidateResultSchema,
+} from "./models/consolidate.js";
 import { type ContextIndexListView, contextIndexListViewSchema } from "./models/context.js";
 import {
   type MemoryCreateRequest,
@@ -74,6 +86,20 @@ export interface RecallOptions extends RequestSignalOption {
   persona?: string;
   maxTokens?: number;
   correlationId?: string;
+  /** Net-new this phase: sent as the `?tier=` QUERY param (never a body field) and always wins
+   * server-side over `channels` — tier-SCOPED recall narrowed to exactly one real channel (the
+   * demo server's `_effective_tier_filter`). `undefined` (the default) leaves channel selection to
+   * `channels`/`mode` as before — no behaviour change for an existing caller that doesn't pass
+   * `tier`. */
+  tier?: MemoryTier;
+}
+
+export interface ConsolidateOptions extends RequestSignalOption {
+  limit?: number;
+}
+
+export interface AskOptions extends RequestSignalOption {
+  limit?: number;
 }
 
 /**
@@ -230,6 +256,10 @@ export class MemoryClient {
    * `POST /v1/memories/recall` — the MU-canonical rich multi-channel read
    * (recall-service-design.md §1.1). Tenancy (`namespace`) is resolved server-side from the auth
    * identity, never sent by the client (see `./models/recall.ts` module docstring).
+   *
+   * `options.tier` (net-new this phase: `"stm"|"mtm"|"ltm"`), when given, is sent as the
+   * `?tier=` QUERY param (not a body field) and always wins server-side over `channels` — see
+   * `RecallOptions.tier`'s own docstring.
    */
   async recall(text: string, options: RecallOptions = {}): Promise<RecallResult> {
     const request: RecallRequest = recallRequestSchema.parse({
@@ -243,9 +273,45 @@ export class MemoryClient {
     });
     const response = await this._execute("POST", "/v1/memories/recall", {
       jsonBody: request,
+      params: options.tier !== undefined ? { tier: options.tier } : undefined,
       signal: options.signal,
     });
     return recallResultSchema.parse(response.jsonBody);
+  }
+
+  /**
+   * `POST /v1/memories/consolidate` (net-new this phase) — MTM->LTM DISTILL: extracts bi-temporal
+   * SPO facts from the recent STM/MTM window and writes them into the LTM graph, applying
+   * invalidate-don't-delete SUPERSESSION (the MemGC/Phi headline capability). Tenancy is resolved
+   * server-side from the auth identity, same as every other verb.
+   */
+  async consolidate(options: ConsolidateOptions = {}): Promise<ConsolidateResult> {
+    const request: ConsolidateRequest = consolidateRequestSchema.parse({
+      limit: options.limit ?? 50,
+    });
+    const response = await this._execute("POST", "/v1/memories/consolidate", {
+      jsonBody: request,
+      signal: options.signal,
+    });
+    return consolidateResultSchema.parse(response.jsonBody);
+  }
+
+  /**
+   * `POST /v1/memories/ask` (net-new this phase) — MU's own SLM-powered synthesis over recalled
+   * context (contrast with the raw ranked list `recall()`/`search()` return). Throws
+   * `ServiceUnavailableError` (mapped from the server's 503) when the server has no LLM/SLM
+   * configured (heuristic mode) — never a silently-empty answer.
+   */
+  async ask(question: string, options: AskOptions = {}): Promise<AskResult> {
+    const request: AskRequest = askRequestSchema.parse({
+      question,
+      limit: options.limit ?? this.#settings.defaultRecallLimit,
+    });
+    const response = await this._execute("POST", "/v1/memories/ask", {
+      jsonBody: request,
+      signal: options.signal,
+    });
+    return askResultSchema.parse(response.jsonBody);
   }
 
   // ---- lifecycle ----
