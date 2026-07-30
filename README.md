@@ -77,9 +77,9 @@ your own server implementing the same contract, or wait for the hosted plane's p
 
 ```mermaid
 flowchart LR
-    App["Your app"] --> SDK["mu-sdk-js"]
-    SDK --> Wire["Wire<br/>REST / MCP / Centrifugo"]
-    Wire --> Srv["mu-server<br/>(not public yet)"]
+    App["Developer's app / agent"] --> SDK["MemoryClient<br/>add - recall - consolidate - ask<br/>tier-scoped recall (stm / mtm / ltm)"]
+    SDK --> Wire["Wire<br/>REST - MCP - Centrifugo<br/>typed schemas (zod)"]
+    Wire --> Srv["mu-server<br/>hosted, governed plane<br/>(not public yet)"]
 ```
 
 `MemoryClient` wraps a `fetch`-based `Transport` behind the same request pipeline as the Python SDK:
