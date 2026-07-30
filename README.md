@@ -95,13 +95,17 @@ or build this code.
 Memory Universe is independent, early-stage work — the productization of about a year of the
 founder's graduation-thesis research into multi-user agentic memory. No funding round, no company,
 no customers yet — an engineer building the open memory layer he believes agent-building teams will
-need, in public, with an application in for [GitHub
-Sponsors](https://github.com/sponsors/TRextabat).
+need, in public.
 
 If you're building JS/TS agent tooling and want to back an open, governance-first memory SDK before
-its hosted counterpart even ships: sponsorship goes toward keeping this SDK — and its parity with
-the Python SDK — maintained and documented while `mu-server`'s beta comes together. No perks — just
-an honest, pre-revenue ask.
+its hosted counterpart even ships: sponsorship goes toward keeping this SDK — and its parity
+with the Python SDK — maintained and documented while `mu-server`'s beta comes together. No perks —
+just an honest, pre-revenue ask.
+
+## Contact
+
+- GitHub: [@TRextabat](https://github.com/TRextabat)
+- Email: amiramiritabat01@gmail.com
 
 ## Links
 
