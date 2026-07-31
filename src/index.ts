@@ -8,6 +8,21 @@
  */
 
 export { ApiKeyAuth, BearerAuth, DemoHeaderAuth, type SdkAuth, resolveAuth } from "./auth.js";
+export {
+  DEFAULT_TOKEN_PATH,
+  type LifecycleSettings,
+  loadEngineServerAuth,
+  type ManagerMode,
+  PRIVATE_PLANE_FIELDS,
+  planeConfigFor,
+  resolveTokenPath,
+  type SdkConfig,
+  type SdkMode,
+  SHARED_PLANE_FIELDS,
+  type SharedPlaneConfig,
+  TOKEN_PATH_ENV_VAR,
+  validatePlaneFields,
+} from "./config.js";
 export type { RequestFunc, RetryOptions } from "./decorators.js";
 export { withRetry, withTimeout, withTrace } from "./decorators.js";
 export { mapWireError } from "./errorMapping.js";
@@ -15,28 +30,37 @@ export {
   AuthenticationError,
   AuthorizationError,
   ConflictError,
+  EngineServerTokenNotFoundError,
   NotFoundError,
+  PlaneFieldRejectedError,
   PrivateDataRejectedError,
   RateLimitedError,
+  SdkConfigError,
   SdkError,
   SdkTimeoutError,
   ServerError,
   ServiceUnavailableError,
+  SurfaceVerbNotImplementedError,
   TransientSdkError,
   TransportError,
   UnexpectedResponseError,
+  UnsupportedModeError,
   ValidationError,
 } from "./errors.js";
 export {
   type AddOptions,
   type AskOptions,
+  type BuildContextOptions,
   type ConsolidateOptions,
   type ContextApi,
+  type GetOptions,
   MemoryClient,
   type MemoryClientOptions,
+  type PromoteOptions,
   type RecallOptions,
   type RequestSignalOption,
   type SearchOptions,
+  type ShareOptions,
 } from "./client.js";
 export {
   type AskRequest,
@@ -51,8 +75,10 @@ export {
 export {
   type ContextIndexListView,
   type ContextIndexView,
+  type ContextView,
   contextIndexListViewSchema,
   contextIndexViewSchema,
+  contextViewSchema,
 } from "./models/context.js";
 export {
   type ContentType,
@@ -60,6 +86,7 @@ export {
   type MemoryListResponse,
   type MemoryResponse,
   type MemoryTier,
+  type MemoryWriteResult,
   type Polarity,
   type Visibility,
   contentTypeSchema,
@@ -67,6 +94,7 @@ export {
   memoryListResponseSchema,
   memoryResponseSchema,
   memoryTierSchema,
+  memoryWriteResultSchema,
   polaritySchema,
   visibilitySchema,
 } from "./models/memory.js";

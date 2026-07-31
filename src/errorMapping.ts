@@ -19,6 +19,7 @@ import {
   type SdkError,
   ServerError,
   ServiceUnavailableError,
+  SurfaceVerbNotImplementedError,
   UnexpectedResponseError,
   ValidationError,
 } from "./errors.js";
@@ -100,6 +101,12 @@ export function mapWireError(response: TransportResponse): void {
       statusCode: status,
       retryAfterS: parseRetryAfter(response),
     });
+  } else if (status === 501) {
+    // `promote`/`demote` (build-queue item 5) — see `SurfaceVerbNotImplementedError`'s docstring.
+    // `MemoryClient#promote()`/`#demote()` throw this same class client-side WITHOUT ever reaching
+    // this branch (no network call is made); this branch exists for the day a real server (Stage
+    // C) actually serves a genuine wire 501 for some other not-yet-built verb.
+    error = new SurfaceVerbNotImplementedError(detail, { requestId, statusCode: status });
   } else if (status === 503) {
     error = new ServiceUnavailableError(detail, {
       requestId,

@@ -115,3 +115,31 @@ export const memoryListResponseSchema = z
   .strict();
 
 export type MemoryListResponse = z.infer<typeof memoryListResponseSchema>;
+
+/**
+ * `MemoryWriteResult` — the canonical `add`-receipt DTO (`mu_contracts.contracts.views.
+ * MemoryWriteResult`, Decision B: "the honest return is a receipt of what happened, not a re-read
+ * of state"). Faithful TS twin of that pydantic model's field set (`memory_id`/`content_hash`/
+ * `promoted`/`tiers_written`/`namespace`/`events_emitted`) — `tiers_written`/`events_emitted` are
+ * Python `tuple[str, ...]`, typed `readonly string[]` here (TS has no fixed-arity tuple-of-
+ * unknown-length type; both serialize to a JSON array on the wire, same as `ContextIndexListView`'s
+ * own `symbolic_facts`/`allowed_memory_ids` fields, `./context.ts`).
+ *
+ * This SDK's own `.add()` (`../client.ts`) does not yet return this shape (it is frozen to the
+ * pre-Stage-D `MemoryResponse`/conformance-server shape — verb bodies are frozen this phase, see
+ * `../client.ts` module docstring); `MemoryWriteResult` is exported here so the net-new Stage D
+ * verbs that DO return it (`get`/`promote`'s documented future-return-shape annotation) have a real
+ * type to reference, matching `mu_sdk.models.memory`'s own re-export-for-parity discipline.
+ */
+export const memoryWriteResultSchema = z
+  .object({
+    memory_id: z.string(),
+    content_hash: z.string(),
+    promoted: z.boolean(),
+    tiers_written: z.array(z.string()),
+    namespace: z.string(),
+    events_emitted: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export type MemoryWriteResult = z.infer<typeof memoryWriteResultSchema>;

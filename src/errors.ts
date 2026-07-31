@@ -136,3 +136,64 @@ export class ServerError extends SdkError {}
  * (DEV-STANDARDS rule 8).
  */
 export class UnexpectedResponseError extends SdkError {}
+
+/**
+ * `promote`/`demote` have no engine/wire counterpart anywhere in the tree yet (build-queue item 5;
+ * design §2.5's unified-verb-surface proposal): "the facade method raises `NotImplementedError`
+ * (never a fake 200) until the engine counterpart lands" (api-mcp-surface-spec.md §4.3b).
+ * `MemoryClient#promote()`/`#demote()` throw this NAMED error (`statusCode=501`) immediately, with
+ * NO network call — there is nothing to call. Faithful mirror of
+ * `mu_sdk.errors.SurfaceVerbNotImplementedError` (Python).
+ *
+ * Also mapped here by `./errorMapping.ts#mapWireError` from a genuine wire HTTP 501, for the day a
+ * real server actually serves one — never a silent no-op or partial success on either path
+ * (DEV-STANDARDS rule 8).
+ */
+export class SurfaceVerbNotImplementedError extends SdkError {}
+
+/**
+ * `MemoryClient({ mode: "embedded" })` is a construction-time error in the JS SDK — JS has no
+ * engine to run in-process (design §1.3: "a JS process cannot host the Python engine... `mode=
+ * "embedded"` is a construction-time error in the JS SDK"). Thrown BEFORE any settings/transport
+ * are built; JS has exactly two real modes (`local_server`/`remote`), both wire clients.
+ */
+export class UnsupportedModeError extends SdkError {}
+
+/**
+ * `SdkConfig` (`./config.ts`) was given a shape that cannot be constructed into a working client —
+ * e.g. `mode="local_server"`/`"remote"` with no `endpoint=`, or a `shared=` sub-object missing its
+ * required `auth`. Distinct from a zod `ZodError` (which fires on a malformed VALUE for a field
+ * that exists) — this is a missing-REQUIRED-combination error, the config-object analogue of
+ * `mu_contracts`'s pydantic `required` field errors on `SharedPlaneConfig`/`SdkConfig` (Python).
+ */
+export class SdkConfigError extends SdkError {}
+
+/**
+ * A canonical-signature field (`./config.ts`'s `PRIVATE_PLANE_FIELDS`/`SHARED_PLANE_FIELDS`) was
+ * supplied for a plane the caller has not configured (design §2.5: "Supplying a field that doesn't
+ * apply to the currently-configured plane is a REJECTION, not a silent no-op"). Faithful mirror of
+ * `mu_contracts.domain.errors.PlaneFieldRejectedError` (Python) — same field/plane/reason shape,
+ * ported rather than imported (this SDK never imports `mu_contracts`' Python package; TS has its
+ * own `./config.ts#validatePlaneFields` doing the identical check).
+ */
+export class PlaneFieldRejectedError extends SdkError {
+  readonly field: string;
+  readonly plane: string;
+
+  constructor(field: string, options: { plane: string; reason: string }) {
+    super(
+      `field '${field}' requires the '${options.plane}' plane to be configured: ${options.reason}`,
+    );
+    this.field = field;
+    this.plane = options.plane;
+  }
+}
+
+/**
+ * `mode="local_server"` with no explicit `auth=` auto-loads the per-process bearer token `make up`
+ * mints to disk (design §1.2 FIX 4, §2.4/§11.2) — this is the NAMED failure when that file is
+ * missing, unreadable, or blank, surfaced instead of a bare `ENOENT`/`fs` exception (DEV-STANDARDS
+ * rule 8: fail-loud, never a silent fallback). Subclasses `AuthenticationError` — it IS an auth
+ * failure, just one discovered before any request is even built.
+ */
+export class EngineServerTokenNotFoundError extends AuthenticationError {}

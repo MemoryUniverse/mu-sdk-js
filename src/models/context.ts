@@ -15,9 +15,22 @@
  * fixed-arity tuple-of-unknown-length type, so these are typed `readonly string[]` here — the
  * natural TS equivalent, not a silent behavior change (both serialize to a JSON array on the
  * wire).
+ *
+ * **`ContextView` (net-new this phase, D2)** — re-exported-shaped here from the canonical
+ * `mu_contracts.contracts.views.ContextView` (Python) — is a DIFFERENT thing from
+ * `ContextIndexView`/`ContextIndexListView` above: it is the return DTO for
+ * `MemoryClient#buildContext(...)`, the PRIVATE-plane context-*window* helper (design §2.5
+ * REVIEW-2 FIX 1 — `LocalMemory.context(...)`'s wire twin, deterministic recall + render, NO LLM
+ * synthesis). Grouped in this module because both are "context"-named, but they are two separate
+ * verbs on two separate planes — see `../client.ts`'s `buildContext`/`ContextApi#discover`
+ * docstrings for the explicit "NOT the same verb" callout this mirrors. `items` reuses the SAME
+ * canonical per-hit item schema `RecallResult.items` uses (`./recall.ts#recallItemViewSchema`) —
+ * ONE hit-item shape for both verbs, matching `mu_contracts.contracts.views.ContextView`'s own
+ * `items: list[RecallItemView]` field.
  */
 
 import { z } from "zod";
+import { recallItemViewSchema } from "./recall.js";
 
 /**
  * The read-only projection of a `ContextIndex` (governance-transfer-core-spec.md:283-294) a peer
@@ -47,3 +60,18 @@ export const contextIndexListViewSchema = z
   .strict();
 
 export type ContextIndexListView = z.infer<typeof contextIndexListViewSchema>;
+
+/**
+ * `MemoryClient#buildContext(text) -> ContextView` (design §2.5 REVIEW-2 FIX 1) — a deterministic
+ * context window (NO LLM synthesis). See module docstring for the "not the same verb as
+ * `ContextIndexView`" callout.
+ */
+export const contextViewSchema = z
+  .object({
+    text: z.string(),
+    items: z.array(recallItemViewSchema),
+    degraded: z.string().nullable().optional(),
+  })
+  .strict();
+
+export type ContextView = z.infer<typeof contextViewSchema>;
