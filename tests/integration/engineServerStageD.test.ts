@@ -132,4 +132,61 @@ describe("MemoryClient(mode=local_server) against a REAL mu-engine-server", () =
     const result = await c.get("whatever-nonexistent", { user: "probe" });
     expect(result).toBeNull(); // 404, not 401 — proves auth succeeded
   });
+
+  // ---- R3: add/recall/consolidate reconciliation (public verb bodies, not the raw _execute seam
+  // the pre-existing tests above use to seed data) ----------------------------------------------
+
+  it("add() — public verb — sends the REAL AddRequest shape and returns a MemoryWriteResult", async () => {
+    const c = client();
+    const user = `js-it-add-${Date.now()}`;
+
+    const written = await c.add("Priya Nkemelu prefers Valkey for the STM layer", { user });
+    // MemoryWriteResult (mu_contracts.contracts.views.MemoryWriteResult) — a receipt, not the
+    // full row: memory_id/content_hash/namespace present, no `content`/`tier`/`created_at`.
+    expect(typeof (written as { memory_id: string }).memory_id).toBe("string");
+    expect((written as { memory_id: string }).memory_id).toBeTruthy();
+    expect(typeof (written as { content_hash: string }).content_hash).toBe("string");
+    expect(typeof (written as { namespace: string }).namespace).toBe("string");
+    expect("content" in written).toBe(false);
+
+    // Prove it was genuinely persisted (not a fabricated receipt) via a real get() round-trip.
+    const fetched = await c.get((written as { memory_id: string }).memory_id, { user });
+    expect(fetched?.content).toBe("Priya Nkemelu prefers Valkey for the STM layer");
+  }, 30_000);
+
+  it("add() — public verb — rejects visibility=/subject=/predicate=/object= (mu-engine-server has no shared plane)", async () => {
+    const c = client();
+    await expect(
+      c.add("whatever", { visibility: "shared", user: `js-it-${Date.now()}` }),
+    ).rejects.toThrow(/no shared plane is configured/);
+  });
+
+  it("recall() — public verb — sends the REAL RecallRequest shape (tier as a body field) and returns a RecallResult", async () => {
+    const c = client();
+    const user = `js-it-recall-${Date.now()}`;
+    await c.add("Tomasz Ibekwe migrated the recall service to FalkorDB", { user });
+
+    const result = await c.recall("Tomasz Ibekwe", { user, tier: "stm", limit: 5 });
+    expect(Array.isArray(result.items)).toBe(true);
+    expect(result.namespace.user).toBe(user);
+    expect(result.channels_run).toBeTruthy();
+  }, 30_000);
+
+  it("consolidate() — public verb — returns the REAL ConsolidateView shape (noop, no generated_at)", async () => {
+    const c = client();
+    const user = `js-it-consolidate-${Date.now()}`;
+    await c.add("Ingrid Solano works at Acme Corp", {
+      user,
+    });
+
+    const result = await c.consolidate({ user, limit: 50 });
+    // ConsolidateView (mu_contracts.contracts.views.ConsolidateView): facts_extracted/added/
+    // superseded/noop, genuinely NO generated_at (contrast with the conformance server's
+    // ConsolidateResult, which requires generated_at and has no noop).
+    expect(typeof result.facts_extracted).toBe("number");
+    expect(typeof result.added).toBe("number");
+    expect(typeof result.superseded).toBe("number");
+    expect(typeof (result as { noop: number }).noop).toBe("number");
+    expect("generated_at" in result).toBe(false);
+  }, 30_000);
 });

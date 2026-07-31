@@ -262,6 +262,248 @@ describe("MemoryClient#buildContext", () => {
   });
 });
 
+describe("MemoryClient#add — R3 reconciliation", () => {
+  const WRITE_RESULT_BODY = {
+    memory_id: "mem_1",
+    content_hash: "abc123",
+    promoted: false,
+    tiers_written: ["stm"],
+    namespace: "org/ws/user/session",
+    events_emitted: [],
+  };
+
+  it("mode=local_server sends the REAL mu-engine-server AddRequest shape: {content, user, session} only", async () => {
+    const transport = transportWith(201, WRITE_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      const result = await client.add("hello", { user: "ada", session: "s1" });
+      expect(transport.calls[0]?.method).toBe("POST");
+      expect(transport.calls[0]?.path).toBe("/memories");
+      expect(transport.calls[0]?.jsonBody).toEqual({
+        content: "hello",
+        user: "ada",
+        session: "s1",
+      });
+      expect(result).toEqual(WRITE_RESULT_BODY);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("mode=local_server never sends tier/importance_score/visibility/subject/predicate/object/metadata (would 422 extra_forbidden on the real server)", async () => {
+    const transport = transportWith(201, WRITE_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      await client.add("hello", {
+        tier: "mtm",
+        importanceScore: 0.9,
+        idempotencyKey: "key-1",
+        localMemoryId: "lm-1",
+        metadata: { k: "v" },
+      });
+      expect(transport.calls[0]?.jsonBody).toEqual({ content: "hello" });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("mode=local_server rejects visibility=/subject=/predicate=/object= — no shared plane configured", async () => {
+    const transport = transportWith(201, WRITE_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      await expect(client.add("hello", { visibility: "shared" })).rejects.toBeInstanceOf(
+        PlaneFieldRejectedError,
+      );
+      expect(transport.calls).toHaveLength(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction rejects user=/session= — no private plane configured", async () => {
+    const transport = transportWith(201, MEMORY_RESPONSE_BODY);
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      await expect(client.add("hello", { user: "ada" })).rejects.toBeInstanceOf(
+        PlaneFieldRejectedError,
+      );
+      expect(transport.calls).toHaveLength(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction is unchanged: still sends MemoryCreateRequest, parses full MemoryResponse", async () => {
+    const transport = transportWith(201, MEMORY_RESPONSE_BODY);
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      const result = await client.add("hello", { visibility: "shared" });
+      expect(transport.calls[0]?.path).toBe("/memories");
+      expect(transport.calls[0]?.jsonBody).toMatchObject({
+        content: "hello",
+        visibility: "shared",
+      });
+      expect((result as { id: string }).id).toBe("mem_1");
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("MemoryClient#recall — R3 reconciliation", () => {
+  const RECALL_RESULT_BODY = {
+    namespace: {
+      org: "local",
+      workspace: "local",
+      user: "ada",
+      session: "s1",
+      visibility: "shared",
+    },
+    items: [],
+    channels_run: { stm: true, mtm: true, ltm: true },
+    degraded: null,
+    generated_at: new Date().toISOString(),
+  };
+
+  it("mode=local_server sends {text, user, session, tier, limit} as BODY fields, no query params", async () => {
+    const transport = transportWith(200, RECALL_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      await client.recall("find me", { user: "ada", session: "s1", tier: "mtm", limit: 7 });
+      expect(transport.calls[0]?.method).toBe("POST");
+      expect(transport.calls[0]?.path).toBe("/v1/memories/recall");
+      expect(transport.calls[0]?.params).toBeUndefined();
+      expect(transport.calls[0]?.jsonBody).toEqual({
+        text: "find me",
+        limit: 7,
+        tier: "mtm",
+        user: "ada",
+        session: "s1",
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("mode=local_server never sends channels/mode/persona/max_tokens/correlation_id (real RecallRequest has no such fields)", async () => {
+    const transport = transportWith(200, RECALL_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      await client.recall("find me", { persona: "p1", maxTokens: 100, correlationId: "c1" });
+      expect(transport.calls[0]?.jsonBody).toEqual({ text: "find me", limit: 10 });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction rejects user=/session= — no private plane configured", async () => {
+    const transport = transportWith(200, RECALL_RESULT_BODY);
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      await expect(client.recall("find me", { user: "ada" })).rejects.toBeInstanceOf(
+        PlaneFieldRejectedError,
+      );
+      expect(transport.calls).toHaveLength(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction is unchanged: tier still sent as a query param, not a body field", async () => {
+    const transport = transportWith(200, RECALL_RESULT_BODY);
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      await client.recall("find me", { tier: "stm" });
+      expect(transport.calls[0]?.params).toEqual({ tier: "stm" });
+      expect(transport.calls[0]?.jsonBody).not.toHaveProperty("tier");
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("MemoryClient#consolidate — R3 reconciliation", () => {
+  it("mode=local_server parses the real ConsolidateView response (noop, no generated_at)", async () => {
+    const transport = transportWith(200, { facts_extracted: 3, added: 2, superseded: 1, noop: 1 });
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      const result = await client.consolidate({ limit: 10, user: "ada", session: "s1" });
+      expect(transport.calls[0]?.method).toBe("POST");
+      expect(transport.calls[0]?.path).toBe("/v1/memories/consolidate");
+      expect(transport.calls[0]?.jsonBody).toEqual({ limit: 10, user: "ada", session: "s1" });
+      expect(result).toEqual({ facts_extracted: 3, added: 2, superseded: 1, noop: 1 });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction rejects user=/session= — no private plane configured", async () => {
+    const transport = transportWith(200, {
+      facts_extracted: 0,
+      added: 0,
+      superseded: 0,
+      generated_at: new Date().toISOString(),
+    });
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      await expect(client.consolidate({ user: "ada" })).rejects.toBeInstanceOf(
+        PlaneFieldRejectedError,
+      );
+      expect(transport.calls).toHaveLength(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("legacy construction is unchanged: still parses ConsolidateResult (generated_at, no noop)", async () => {
+    const now = new Date().toISOString();
+    const transport = transportWith(200, {
+      facts_extracted: 1,
+      added: 1,
+      superseded: 0,
+      generated_at: now,
+    });
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      const result = await client.consolidate({ limit: 5 });
+      expect(transport.calls[0]?.jsonBody).toEqual({ limit: 5 });
+      expect((result as { generated_at: Date }).generated_at).toBeInstanceOf(Date);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
 describe("MemoryClient#share — plane-gating", () => {
   it("mode=local_server with no shared= rejects visibility= — no shared plane configured", async () => {
     const transport = transportWith(200, MEMORY_RESPONSE_BODY);

@@ -49,13 +49,21 @@
  * `GET /v1/memories/{id}`; `POST /v1/context/window` body field `query`, not `text`) — an
  * unreconciled gap the design spec itself flags as open (§2.5: "which existing DTO wins as
  * canonical per verb... is not decided by this section... tracked as its own Build-queue item").
- * `get`/`buildContext` therefore branch on whether this instance was constructed with
- * `mode="local_server"` (`#engineServerMode`) and send mu-engine-server's REAL shape in that case —
- * verified end-to-end against a real running `mu-engine-server` instance, see
- * `tests/integration/engineServerStageD.test.ts`. `add`/`recall`/`search`/`consolidate`/`ask`/
- * `.context.discover` are UNCHANGED (frozen verb bodies, still conformance-server/shared-plane
- * shaped) — reconciling THEM against `mu-engine-server` is out of this task's scope (D1's/a future
- * task's job), flagged here rather than silently left implicit.
+ * `get`/`buildContext`/`add`/`recall`/`consolidate` therefore branch on whether this instance was
+ * constructed with `mode="local_server"` (`#engineServerMode`) and send mu-engine-server's REAL
+ * shape in that case — verified end-to-end against a real running `mu-engine-server` instance, see
+ * `tests/integration/engineServerStageD.test.ts`/`tests/integration/engineServerR3.test.ts` (R3,
+ * SDK<->mu-engine-server wire-REQUEST reconciliation: `add`'s real `AddRequest` is
+ * `{content, user, session}` only — no `tier`/`importance_score`/`visibility`/`subject`/
+ * `predicate`/`object`/`metadata`, the exact fields whose presence 422s `extra_forbidden` against
+ * the real server; `recall`'s real `RecallRequest` is `{text, user, session, tier, limit}` with
+ * `tier` as a BODY field, not the conformance-server's `?tier=` query param, and no
+ * `channels`/`mode`/`persona`/`max_tokens`/`correlation_id`; `consolidate`'s real response is
+ * `ConsolidateView` — `noop`, no `generated_at` — not the conformance server's `ConsolidateResult`).
+ * `search`/`ask`/`.context.discover` are UNCHANGED (frozen verb bodies, still
+ * conformance-server/shared-plane shaped; `mu-engine-server` has no `GET /memories`/
+ * `POST /v1/memories/ask`/`POST /v1/context/discover` routes at all) — reconciling THEM is out of
+ * this task's scope, flagged here rather than silently left implicit.
  *
  * Cancellation (DEV-STANDARDS rule 1, JS analogue): every public verb accepts an optional
  * `signal?: AbortSignal` — the caller's own cancellation token. It is threaded, untouched, through
@@ -80,10 +88,12 @@ import {
   type AskResult,
   type ConsolidateRequest,
   type ConsolidateResult,
+  type ConsolidateView,
   askRequestSchema,
   askResultSchema,
   consolidateRequestSchema,
   consolidateResultSchema,
+  consolidateViewSchema,
 } from "./models/consolidate.js";
 import {
   type ContextIndexListView,
@@ -101,6 +111,7 @@ import {
   memoryCreateRequestSchema,
   memoryListResponseSchema,
   memoryResponseSchema,
+  memoryWriteResultSchema,
 } from "./models/memory.js";
 import {
   DEFAULT_RECALL_CHANNELS,
@@ -132,6 +143,12 @@ export interface AddOptions extends RequestSignalOption {
   /** matches the frozen wire field name (Appendix A.1) exactly */
   object?: string;
   metadata?: Record<string, string>;
+  /** Private-plane fields (net-new, R3 reconciliation), plane-gated exactly like `get()`'s
+   * `user`/`session` — see `add()`'s docstring. Meaningful (sent as real body fields) only when
+   * `mode="local_server"`; REJECTED under legacy/`mode="remote"` construction (no private plane
+   * configured there). */
+  user?: string;
+  session?: string;
 }
 
 export interface SearchOptions extends RequestSignalOption {
@@ -146,16 +163,26 @@ export interface RecallOptions extends RequestSignalOption {
   persona?: string;
   maxTokens?: number;
   correlationId?: string;
-  /** Net-new this phase: sent as the `?tier=` QUERY param (never a body field) and always wins
-   * server-side over `channels` — tier-SCOPED recall narrowed to exactly one real channel (the
-   * demo server's `_effective_tier_filter`). `undefined` (the default) leaves channel selection to
-   * `channels`/`mode` as before — no behaviour change for an existing caller that doesn't pass
-   * `tier`. */
+  /** Legacy/conformance-server construction: sent as the `?tier=` QUERY param (never a body
+   * field) and always wins server-side over `channels` — tier-SCOPED recall narrowed to exactly
+   * one real channel (the demo server's `_effective_tier_filter`). `mode="local_server"`: sent as
+   * a BODY field instead (`mu_engine_server.schemas.RecallRequest.tier` — see `recall()`'s
+   * docstring for the real-vs-conformance-server body-shape split). `undefined` (the default)
+   * leaves channel selection to `channels`/`mode` as before — no behaviour change for an existing
+   * caller that doesn't pass `tier`. */
   tier?: MemoryTier;
+  /** Private-plane fields (net-new, R3 reconciliation), plane-gated like `get()`'s `user`/
+   * `session`. Meaningful (sent as real body fields) only when `mode="local_server"`. */
+  user?: string;
+  session?: string;
 }
 
 export interface ConsolidateOptions extends RequestSignalOption {
   limit?: number;
+  /** Private-plane fields (net-new, R3 reconciliation), plane-gated like `get()`'s `user`/
+   * `session`. Meaningful (sent as real body fields) only when `mode="local_server"`. */
+  user?: string;
+  session?: string;
 }
 
 export interface AskOptions extends RequestSignalOption {
@@ -391,8 +418,58 @@ export class MemoryClient {
    *
    * `idempotencyKey`, when given, is sent as the `Idempotency-Key` HEADER (api-mcp-surface-spec.md
    * §2.3 write-idempotency contract) — never duplicated into the JSON body.
+   *
+   * `options.user`/`options.session` are private-plane fields, plane-gated exactly like `get()`'s
+   * (`./config.ts#validatePlaneFields`) — REJECTED under legacy/`mode="remote"` construction (no
+   * private plane configured), accepted under `mode="local_server"`.
+   * `options.visibility`/`subject`/`predicate`/`object` are shared-plane fields, plane-gated the
+   * SAME way `share()`'s `visibility` is — REJECTED under `mode="local_server"` with no `shared=`
+   * (`mu-engine-server` has no shared plane at all, design §2.2).
+   *
+   * **Route/body branches on `mode="local_server"`** (`#engineServerMode`, see module docstring's
+   * "local_server targets the REAL mu-engine-server" section, R3 reconciliation): the real
+   * `mu-engine-server`'s `AddRequest` (`mu_engine_server/schemas.py`, `extra="forbid"`) declares
+   * ONLY `{content, user, session}` — this is the exact bug this reconciliation fixes (the
+   * conformance-server shape below 422s against the real server: "extra_forbidden" on
+   * `tier`/`importance_score`/`visibility`/`subject`/`predicate`/`object`/`metadata`, none of
+   * which the real route's schema/handler reads, `mu_engine_server/routes/memories.py::add_memory`
+   * only ever passes `body.content`/`body.user`/`body.session` to the facade). Under this mode the
+   * wire body is exactly `{content, user?, session?}` and the response is the real route's own
+   * `response_model=MemoryWriteResult` (`mu_contracts.contracts.views.MemoryWriteResult`) — a
+   * write RECEIPT, not the full row (contrast with the legacy/conformance-server path below, which
+   * still returns the full `MemoryResponse` row; the two servers genuinely disagree on this verb's
+   * response shape today, so this method's return type is a real union of both, not a single
+   * canonical DTO). Every other construction path is UNCHANGED (still targets the conformance
+   * server's placeholder `MemoryCreateRequest`/`MemoryResponse` shape).
    */
-  async add(content: string, options: AddOptions = {}): Promise<MemoryResponse> {
+  async add(
+    content: string,
+    options: AddOptions = {},
+  ): Promise<MemoryResponse | MemoryWriteResult> {
+    validatePlaneFields(
+      {
+        user: options.user,
+        session: options.session,
+        visibility: options.visibility,
+        subject: options.subject,
+        predicate: options.predicate,
+        object: options.object,
+      },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
+    );
+    if (this.#engineServerMode) {
+      const body: Record<string, unknown> = { content };
+      if (options.user !== undefined) body.user = options.user;
+      if (options.session !== undefined) body.session = options.session;
+      const response = await this._execute("POST", "/memories", {
+        jsonBody: body,
+        signal: options.signal,
+      });
+      return memoryWriteResultSchema.parse(response.jsonBody);
+    }
     const request: MemoryCreateRequest = memoryCreateRequestSchema.parse({
       content,
       visibility: options.visibility ?? "shared",
@@ -437,13 +514,48 @@ export class MemoryClient {
   /**
    * `POST /v1/memories/recall` — the MU-canonical rich multi-channel read
    * (recall-service-design.md §1.1). Tenancy (`namespace`) is resolved server-side from the auth
-   * identity, never sent by the client (see `./models/recall.ts` module docstring).
+   * identity, never sent by the client (see `./models/recall.ts` module docstring), UNLESS
+   * `options.user`/`options.session` are supplied under `mode="local_server"` (private-plane
+   * fields, net-new this phase — see below).
    *
-   * `options.tier` (net-new this phase: `"stm"|"mtm"|"ltm"`), when given, is sent as the
+   * **Route/body branches on `mode="local_server"`** (`#engineServerMode`, R3 reconciliation): the
+   * real `mu-engine-server`'s `RecallRequest` (`mu_engine_server/schemas.py`, `extra="forbid"`)
+   * declares `{text, user, session, tier, limit}` — note `tier` is a BODY field there
+   * (`mu_engine_server/routes/memories.py::recall_memories` reads `body.tier`, no query-param
+   * dependency at all), NOT the `?tier=` query param the conformance-server shape below uses; and
+   * `channels`/`mode`/`persona`/`max_tokens`/`correlation_id` do not exist on the real schema at
+   * all (would 422 `extra_forbidden`, the same class of bug this reconciliation fixes for `add`).
+   * Under this mode, `options.tier` is therefore sent as a BODY field, not a query param, and
+   * `channels`/`mode`/`persona`/`maxTokens`/`correlationId` are never sent (there is nothing real
+   * for them to reach — recall is always the real engine's own ranked/federated behavior under
+   * this mode). `options.user`/`options.session` are plane-gated exactly like `get()`'s.
+   *
+   * Every other construction path is UNCHANGED: `options.tier`, when given, is sent as the
    * `?tier=` QUERY param (not a body field) and always wins server-side over `channels` — see
    * `RecallOptions.tier`'s own docstring.
    */
   async recall(text: string, options: RecallOptions = {}): Promise<RecallResult> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
+    );
+    if (this.#engineServerMode) {
+      const body: Record<string, unknown> = {
+        text,
+        limit: options.limit ?? this.#settings.defaultRecallLimit,
+      };
+      if (options.tier !== undefined) body.tier = options.tier;
+      if (options.user !== undefined) body.user = options.user;
+      if (options.session !== undefined) body.session = options.session;
+      const response = await this._execute("POST", "/v1/memories/recall", {
+        jsonBody: body,
+        signal: options.signal,
+      });
+      return recallResultSchema.parse(response.jsonBody);
+    }
     const request: RecallRequest = recallRequestSchema.parse({
       text,
       limit: options.limit ?? this.#settings.defaultRecallLimit,
@@ -618,9 +730,43 @@ export class MemoryClient {
    * `POST /v1/memories/consolidate` (net-new this phase) — MTM->LTM DISTILL: extracts bi-temporal
    * SPO facts from the recent STM/MTM window and writes them into the LTM graph, applying
    * invalidate-don't-delete SUPERSESSION (the MemGC/Phi headline capability). Tenancy is resolved
-   * server-side from the auth identity, same as every other verb.
+   * server-side from the auth identity, same as every other verb, UNLESS `options.user`/
+   * `options.session` are supplied under `mode="local_server"` (private-plane fields, net-new
+   * this phase, plane-gated exactly like `get()`'s).
+   *
+   * **Route/response branch on `mode="local_server"`** (`#engineServerMode`, R3 reconciliation):
+   * the real `mu-engine-server`'s `POST /v1/memories/consolidate` (`mu_engine_server/routes/
+   * memories.py::consolidate_memories`) declares `response_model=ConsolidateView`
+   * (`mu_contracts.contracts.views.ConsolidateView`) — `{facts_extracted, added, superseded,
+   * noop}`, NO `generated_at` — a genuine mismatch against the conformance server's
+   * `ConsolidateResult` shape below (`generated_at`, no `noop`) that would otherwise fail
+   * `consolidateResultSchema.parse(...)` (missing required `generated_at`). This method parses the
+   * response with the mode-appropriate schema (`consolidateViewSchema` vs.
+   * `consolidateResultSchema`) rather than picking one winner — both are real, live server
+   * responses. Request body: `{limit, user?, session?}` (`mu_engine_server.schemas.
+   * ConsolidateRequest` — field-identical to the conformance-server shape plus the two
+   * plane-gated private fields).
    */
-  async consolidate(options: ConsolidateOptions = {}): Promise<ConsolidateResult> {
+  async consolidate(
+    options: ConsolidateOptions = {},
+  ): Promise<ConsolidateResult | ConsolidateView> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
+    );
+    if (this.#engineServerMode) {
+      const body: Record<string, unknown> = { limit: options.limit ?? 50 };
+      if (options.user !== undefined) body.user = options.user;
+      if (options.session !== undefined) body.session = options.session;
+      const response = await this._execute("POST", "/v1/memories/consolidate", {
+        jsonBody: body,
+        signal: options.signal,
+      });
+      return consolidateViewSchema.parse(response.jsonBody);
+    }
     const request: ConsolidateRequest = consolidateRequestSchema.parse({
       limit: options.limit ?? 50,
     });

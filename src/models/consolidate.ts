@@ -21,6 +21,18 @@
  * `POST /v1/memories/ask` returns a NAMED 503 (`mu_local.errors.LlmNotConfiguredError`
  * server-side), which `../errorMapping.ts`'s `mapWireError` already turns into a
  * `ServiceUnavailableError` — no new SDK error-mapping case needed.
+ *
+ * **`ConsolidateView` (R3, SDK<->mu-engine-server wire-request reconciliation) — the REAL
+ * mu-engine-server's `POST /v1/memories/consolidate` response shape, `response_model=
+ * ConsolidateView` (`mu_engine_server/routes/memories.py`), the canonical
+ * `mu_contracts.contracts.views.ConsolidateView` (Python; verified field-for-field before writing
+ * this class): `{facts_extracted, added, superseded, noop}` — genuinely DIFFERENT from
+ * `ConsolidateResult` above (no `generated_at`, has `noop`), not a superset/subset typo. The
+ * conformance server's `POST /v1/memories/consolidate` (`mu-sdk-python/tests/conformance_server/
+ * app.py`) returns the OTHER shape (`generated_at`, no `noop`) — both are real, live shapes for two
+ * different real servers this one class's `consolidate()` method can target depending on
+ * construction mode (`../client.ts`'s `#engineServerMode` branch), so both schemas are kept,
+ * neither retired.
  */
 
 import { z } from "zod";
@@ -50,6 +62,23 @@ export const consolidateResultSchema = z
   .strict();
 
 export type ConsolidateResult = z.infer<typeof consolidateResultSchema>;
+
+/**
+ * The REAL `mu-engine-server` DISTILL-sweep receipt (`mu_contracts.contracts.views.
+ * ConsolidateView`, `POST /v1/memories/consolidate`'s real `response_model` — see module
+ * docstring's "ConsolidateView" section). `noop` is the MUST-ADD field the pre-canonical embedded
+ * shape used to silently drop (Decision B) — genuine engine counts, never an echo of the request.
+ */
+export const consolidateViewSchema = z
+  .object({
+    facts_extracted: z.number().int().min(0),
+    added: z.number().int().min(0),
+    superseded: z.number().int().min(0),
+    noop: z.number().int().min(0),
+  })
+  .strict();
+
+export type ConsolidateView = z.infer<typeof consolidateViewSchema>;
 
 /** The wire request body for `POST /v1/memories/ask`. */
 export const askRequestSchema = z
