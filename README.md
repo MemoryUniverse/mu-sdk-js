@@ -1,4 +1,4 @@
-<img src="assets/logo.svg" alt="mu-sdk-js" width="96" height="96">
+<img src="assets/logo-lockup.png" alt="mu-sdk-js" width="420">
 
 # mu-sdk-js
 
