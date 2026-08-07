@@ -1,4 +1,10 @@
+<img src="assets/logo.svg" alt="mu-sdk-js" width="96" height="96">
+
 # mu-sdk-js
+
+TypeScript/JavaScript wire client for Memory Universe. No engine inside — it talks over the versioned contracts.
+
+Part of [Memory Universe](https://github.com/MemoryUniverse).
 
 **The JavaScript/TypeScript developer SDK for Memory Universe.** The same typed memory surface as
 `mu-sdk-python`, for web, Node, and browser-side agent developers.
