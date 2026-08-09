@@ -758,7 +758,9 @@ export class MemoryClient {
       },
     );
     if (this.#engineServerMode) {
-      const body: Record<string, unknown> = { limit: options.limit ?? 50 };
+      const body: Record<string, unknown> = {
+        limit: options.limit ?? this.#settings.defaultConsolidateLimit,
+      };
       if (options.user !== undefined) body.user = options.user;
       if (options.session !== undefined) body.session = options.session;
       const response = await this._execute("POST", "/v1/memories/consolidate", {
@@ -768,7 +770,7 @@ export class MemoryClient {
       return consolidateViewSchema.parse(response.jsonBody);
     }
     const request: ConsolidateRequest = consolidateRequestSchema.parse({
-      limit: options.limit ?? 50,
+      limit: options.limit ?? this.#settings.defaultConsolidateLimit,
     });
     const response = await this._execute("POST", "/v1/memories/consolidate", {
       jsonBody: request,

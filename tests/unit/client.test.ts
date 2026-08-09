@@ -100,6 +100,36 @@ describe("MemoryClient — consolidate/ask/recall(tier) request construction", (
     }
   });
 
+  it("consolidate() omitting limit resolves from settings.defaultConsolidateLimit, not a hardcoded 50", async () => {
+    // Group D / C4 regression guard (CONFIG-AND-DATA-FIX-PLAN.md §1.1 site #8,
+    // `client.ts:761,771` — "no settings field backs it"): the previous test alone can't
+    // distinguish "reads settings.defaultConsolidateLimit" from "hardcodes 50" because the
+    // default of that field IS 50 — exactly the `02fbed9` coincidental-equality trap. This test
+    // sets a settings value that is NOT the field's own default so only real wiring can pass it
+    // through. Mirrors `mu-sdk-python/tests/integration/test_memory_client_conformance.py`'s
+    // `default_recall_limit` regression test for `default_consolidate_limit`.
+    const customSettings = resolveSdkSettings({
+      baseUrl: "http://unit-test.invalid",
+      identity: { userId: "alice", workspaceId: "ws-1", namespaceId: "ns-1", sessionId: "s-1" },
+      maxRetries: 0,
+      defaultConsolidateLimit: 3,
+    });
+    const now = new Date().toISOString();
+    const transport = transportWith({
+      facts_extracted: 0,
+      added: 0,
+      superseded: 0,
+      generated_at: now,
+    });
+    const client = new MemoryClient({ settings: customSettings, transport });
+    try {
+      await client.consolidate();
+      expect(transport.calls[0]?.jsonBody).toEqual({ limit: 3 });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("ask() posts to the net-new route and returns the synthesized answer", async () => {
     const now = new Date().toISOString();
     const transport = transportWith({

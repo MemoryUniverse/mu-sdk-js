@@ -13,6 +13,7 @@ const MU_ENV_KEYS = [
   "MU_MAX_RETRIES",
   "MU_DEFAULT_PAGE_LIMIT",
   "MU_DEFAULT_RECALL_LIMIT",
+  "MU_DEFAULT_CONSOLIDATE_LIMIT",
   "MU_IDENTITY__USER_ID",
   "MU_IDENTITY__WORKSPACE_ID",
   "MU_IDENTITY__NAMESPACE_ID",
@@ -43,6 +44,7 @@ describe("resolveSdkSettings", () => {
     expect(isIdentityComplete(settings.identity)).toBe(false);
     expect(settings.defaultPageLimit).toBe(10);
     expect(settings.defaultRecallLimit).toBe(10);
+    expect(settings.defaultConsolidateLimit).toBe(50);
   });
 
   it("makes defaultRecallLimit independently configurable from defaultPageLimit", () => {
@@ -51,8 +53,29 @@ describe("resolveSdkSettings", () => {
     expect(settings.defaultRecallLimit).toBe(40);
   });
 
+  it("makes defaultConsolidateLimit independently configurable (Group D / C4)", () => {
+    // Closes the `limit=10 / limit=50` stray-literal bug class's site #8
+    // (CONFIG-AND-DATA-FIX-PLAN.md §1.1 Group D: "no settings field backs it", `client.ts:761,771`)
+    // — `consolidate()`'s sweep size now has its own settings knob, tuned independently of
+    // `defaultRecallLimit`/`defaultPageLimit`, same discipline the Python SDK's
+    // `default_consolidate_limit` already got.
+    const settings = resolveSdkSettings({ defaultRecallLimit: 40, defaultConsolidateLimit: 75 });
+    expect(settings.defaultRecallLimit).toBe(40);
+    expect(settings.defaultConsolidateLimit).toBe(75);
+  });
+
   it.each([0, 101])("bounds defaultRecallLimit (rejects %i)", (badLimit) => {
     expect(() => resolveSdkSettings({ defaultRecallLimit: badLimit })).toThrow();
+  });
+
+  it.each([0, 1001])("bounds defaultConsolidateLimit (rejects %i)", (badLimit) => {
+    expect(() => resolveSdkSettings({ defaultConsolidateLimit: badLimit })).toThrow();
+  });
+
+  it("reads defaultConsolidateLimit from the environment", () => {
+    process.env.MU_DEFAULT_CONSOLIDATE_LIMIT = "77";
+    const settings = resolveSdkSettings();
+    expect(settings.defaultConsolidateLimit).toBe(77);
   });
 
   it("reads baseUrl and apiKey from the environment", () => {

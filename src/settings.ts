@@ -63,6 +63,14 @@ const sdkSettingsSchema = z
     // muscle-memory verb) while `recall()` is the richer multi-channel read — they are tuned
     // separately server-side, so the SDK gives each its own knob rather than coupling them.
     defaultRecallLimit: z.number().int().min(1).max(100).default(10),
+    // `consolidate()`'s sweep-size default — closes the `limit=10 / limit=50` stray-literal bug
+    // class (CONFIG-AND-DATA-FIX-PLAN.md §1.1 Group D, C4: "no settings field backs it" was site
+    // #8, `client.ts:761,771`). Mirrors the Python SDK's `SdkSettings.default_consolidate_limit`
+    // (`mu-sdk-python/src/mu_sdk/settings.py`), itself sourced from `mu_contracts`'s
+    // `DEFAULT_CONSOLIDATE_LIMIT` — cross-language, so this schema's own `default(50)` is the one
+    // place this value is authored on the JS side, same discipline `defaultRecallLimit` already
+    // uses for its own default.
+    defaultConsolidateLimit: z.number().int().min(1).max(1000).default(50),
   })
   .strict();
 
@@ -116,6 +124,8 @@ function readEnvSettings(): SdkSettingsInput {
   if (defaultPageLimit !== undefined) env.defaultPageLimit = defaultPageLimit;
   const defaultRecallLimit = envNumber("DEFAULT_RECALL_LIMIT");
   if (defaultRecallLimit !== undefined) env.defaultRecallLimit = defaultRecallLimit;
+  const defaultConsolidateLimit = envNumber("DEFAULT_CONSOLIDATE_LIMIT");
+  if (defaultConsolidateLimit !== undefined) env.defaultConsolidateLimit = defaultConsolidateLimit;
   if (hasIdentity) env.identity = identity;
   return env;
 }
