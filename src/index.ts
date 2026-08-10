@@ -63,6 +63,14 @@ export {
   type ShareOptions,
 } from "./client.js";
 export {
+  type InjectMode,
+  type LlmCall,
+  MemoryMiddleware,
+  type MiddlewareConfig,
+  type TurnTenancy,
+  defaultRender,
+} from "./middleware.js";
+export {
   type AskRequest,
   type AskResult,
   type ConsolidateRequest,
