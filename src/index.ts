@@ -53,6 +53,8 @@ export {
   type BuildContextOptions,
   type ConsolidateOptions,
   type ContextApi,
+  type DeleteOptions,
+  type DemoteOptions,
   type GetOptions,
   MemoryClient,
   type MemoryClientOptions,
@@ -61,6 +63,7 @@ export {
   type RequestSignalOption,
   type SearchOptions,
   type ShareOptions,
+  type UpdateOptions,
 } from "./client.js";
 export {
   type InjectMode,
@@ -94,6 +97,7 @@ export {
   type MemoryListResponse,
   type MemoryResponse,
   type MemoryTier,
+  type MemoryVerbResult,
   type MemoryWriteResult,
   type Polarity,
   type Visibility,
@@ -102,6 +106,7 @@ export {
   memoryListResponseSchema,
   memoryResponseSchema,
   memoryTierSchema,
+  memoryVerbResultSchema,
   memoryWriteResultSchema,
   polaritySchema,
   visibilitySchema,

@@ -11,12 +11,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BearerAuth } from "../../src/auth.js";
 import { MemoryClient } from "../../src/client.js";
-import {
-  PlaneFieldRejectedError,
-  SdkConfigError,
-  SurfaceVerbNotImplementedError,
-  UnsupportedModeError,
-} from "../../src/errors.js";
+import { PlaneFieldRejectedError, SdkConfigError, UnsupportedModeError } from "../../src/errors.js";
 import type {
   Transport,
   TransportRequestOptions,
@@ -555,30 +550,78 @@ describe("MemoryClient#share — plane-gating", () => {
   });
 });
 
-describe("MemoryClient#promote / #demote — honest 501, no network call", () => {
-  it("promote() throws SurfaceVerbNotImplementedError(501) without touching the transport", async () => {
-    const transport = transportWith(200, {});
+describe("MemoryClient#promote / #demote / #update / #delete — REAL wire verbs (item 5)", () => {
+  it("promote() POSTs to the real route and returns a MemoryVerbResult", async () => {
+    const transport = transportWith(200, {
+      memory_id: "mem_1",
+      verb: "promote",
+      from_tier: "stm",
+      to_tier: "mtm",
+      tiers_affected: ["mtm"],
+    });
     const client = new MemoryClient({ transport, auth: FAKE_AUTH });
     try {
-      await expect(client.promote("mem_1", { toTier: "mtm" })).rejects.toMatchObject({
-        constructor: SurfaceVerbNotImplementedError,
-        statusCode: 501,
-      });
-      expect(transport.calls).toHaveLength(0);
+      const result = await client.promote("mem_1", { toTier: "mtm" });
+      expect(result.verb).toBe("promote");
+      expect(result.to_tier).toBe("mtm");
+      expect(transport.calls[0]?.method).toBe("POST");
+      expect(transport.calls[0]?.path).toBe("/v1/memories/mem_1/promote");
+      expect(transport.calls[0]?.jsonBody).toMatchObject({ to_tier: "mtm" });
     } finally {
       await client.close();
     }
   });
 
-  it("demote() throws SurfaceVerbNotImplementedError(501) without touching the transport", async () => {
-    const transport = transportWith(200, {});
+  it("demote() POSTs to the real route", async () => {
+    const transport = transportWith(200, {
+      memory_id: "mem_1",
+      verb: "demote",
+      from_tier: "mtm",
+      to_tier: "stm",
+    });
     const client = new MemoryClient({ transport, auth: FAKE_AUTH });
     try {
-      await expect(client.demote("mem_1", { toTier: "stm" })).rejects.toMatchObject({
-        constructor: SurfaceVerbNotImplementedError,
-        statusCode: 501,
-      });
-      expect(transport.calls).toHaveLength(0);
+      const result = await client.demote("mem_1", { toTier: "stm" });
+      expect(result.verb).toBe("demote");
+      expect(transport.calls[0]?.path).toBe("/v1/memories/mem_1/demote");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("update() PUTs new content and returns the new memory", async () => {
+    const transport = transportWith(200, {
+      memory_id: "mem_new",
+      verb: "update",
+      superseded_id: "mem_1",
+    });
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      const result = await client.update("mem_1", "Ada lives in Berlin");
+      expect(result.memory_id).toBe("mem_new");
+      expect(result.superseded_id).toBe("mem_1");
+      expect(transport.calls[0]?.method).toBe("PUT");
+      expect(transport.calls[0]?.path).toBe("/memories/mem_1");
+      expect(transport.calls[0]?.jsonBody).toMatchObject({ new_content: "Ada lives in Berlin" });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("delete() sends DELETE and returns a soft-delete receipt", async () => {
+    const transport = transportWith(200, {
+      memory_id: "mem_1",
+      verb: "delete",
+      invalidated: true,
+      tiers_affected: ["stm"],
+    });
+    const client = new MemoryClient({ transport, auth: FAKE_AUTH });
+    try {
+      const result = await client.delete("mem_1");
+      expect(result.verb).toBe("delete");
+      expect(result.invalidated).toBe(true);
+      expect(transport.calls[0]?.method).toBe("DELETE");
+      expect(transport.calls[0]?.path).toBe("/memories/mem_1");
     } finally {
       await client.close();
     }

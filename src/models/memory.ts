@@ -143,3 +143,27 @@ export const memoryWriteResultSchema = z
   .strict();
 
 export type MemoryWriteResult = z.infer<typeof memoryWriteResultSchema>;
+
+/**
+ * `MemoryVerbResult` — the receipt of one TARGETED single-memory lifecycle verb
+ * (`promote`/`demote`/`update`/`delete`, `mu_contracts.contracts.views.MemoryVerbResult`,
+ * build-queue §13 item 5). Distinct from `MemoryWriteResult` (the `add` receipt): these verbs act
+ * on an already-resident memory, so the informative fields are the tier transition
+ * (`from_tier`/`to_tier`), which tiers were touched (`tiers_affected`), and — for `update` — the
+ * old id superseded by the new (`superseded_id`, with `memory_id` being the NEW version's id).
+ * `invalidated` is set by `delete` (soft-deleted: state=expired + invalid_at, kept in history).
+ */
+export const memoryVerbResultSchema = z
+  .object({
+    memory_id: z.string(),
+    verb: z.string(),
+    from_tier: z.string().nullable().default(null),
+    to_tier: z.string().nullable().default(null),
+    tiers_affected: z.array(z.string()).default([]),
+    superseded_id: z.string().nullable().default(null),
+    invalidated: z.boolean().default(false),
+    events_emitted: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export type MemoryVerbResult = z.infer<typeof memoryVerbResultSchema>;

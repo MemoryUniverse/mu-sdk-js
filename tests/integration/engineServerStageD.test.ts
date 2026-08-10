@@ -11,7 +11,7 @@
  * - `mode="embedded"` throws `UnsupportedModeError` at construction (no server needed — re-asserted
  *   here for completeness; the exhaustive coverage is the unit suite,
  *   `tests/unit/clientStageD.test.ts`).
- * - `promote`/`demote` raise the named 501 (client-side, no network call).
+ * - `promote`/`demote` are REAL wire verbs; a nonexistent id maps to NotFoundError (404).
  * - The bearer token auto-load (design §1.2 FIX 4) is exercised end-to-end: this suite writes the
  *   REAL token the launcher minted to a temp path and lets `MemoryClient` auto-load it — the
  *   server accepts the request, proving the auto-loaded credential is byte-correct.
@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MemoryClient } from "../../src/client.js";
-import { SurfaceVerbNotImplementedError, UnsupportedModeError } from "../../src/errors.js";
+import { NotFoundError, UnsupportedModeError } from "../../src/errors.js";
 import { type EngineServer, startEngineServer } from "./engineServer.js";
 
 const SETUP_TIMEOUT_MS = 90_000;
@@ -109,14 +109,10 @@ describe("MemoryClient(mode=local_server) against a REAL mu-engine-server", () =
     );
   });
 
-  it("promote()/demote() throw SurfaceVerbNotImplementedError(501), no network call", async () => {
+  it("promote()/demote() are REAL wire verbs — a nonexistent id maps to NotFoundError (404)", async () => {
     const c = client();
-    await expect(c.promote("mem_x", { toTier: "mtm" })).rejects.toBeInstanceOf(
-      SurfaceVerbNotImplementedError,
-    );
-    await expect(c.demote("mem_x", { toTier: "stm" })).rejects.toBeInstanceOf(
-      SurfaceVerbNotImplementedError,
-    );
+    await expect(c.promote("mem_x", { toTier: "mtm" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(c.demote("mem_x", { toTier: "stm" })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("the auto-loaded token from server.tokenPath genuinely authenticates (no auth= passed)", async () => {

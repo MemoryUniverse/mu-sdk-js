@@ -77,12 +77,7 @@ import type { SdkConfig } from "./config.js";
 import { loadEngineServerAuth, planeConfigFor, validatePlaneFields } from "./config.js";
 import { type RequestFunc, withRetry, withTimeout, withTrace } from "./decorators.js";
 import { mapWireError } from "./errorMapping.js";
-import {
-  NotFoundError,
-  SdkConfigError,
-  SurfaceVerbNotImplementedError,
-  UnsupportedModeError,
-} from "./errors.js";
+import { NotFoundError, SdkConfigError, UnsupportedModeError } from "./errors.js";
 import {
   type AskRequest,
   type AskResult,
@@ -106,11 +101,13 @@ import {
   type MemoryListResponse,
   type MemoryResponse,
   type MemoryTier,
+  type MemoryVerbResult,
   type MemoryWriteResult,
   type Visibility,
   memoryCreateRequestSchema,
   memoryListResponseSchema,
   memoryResponseSchema,
+  memoryVerbResultSchema,
   memoryWriteResultSchema,
 } from "./models/memory.js";
 import {
@@ -212,12 +209,29 @@ export interface ShareOptions extends RequestSignalOption {
   visibility: Visibility;
 }
 
-/** `promote()`/`demote()` accept but never use these — matching the documented future request
- * shape (`{to_tier, manager_mode?}`); there is no request to build yet (both always throw
- * `SurfaceVerbNotImplementedError`, see their own docstrings). */
+/** `promote()`/`demote()` request options — `toTier` names the destination tier (`"mtm"`/`"ltm"`
+ * for promote; `"stm"` for demote). Private-plane `user`/`session` name the η partition (a
+ * targeted lifecycle move is private-plane; the shared plane has no tier move). */
 export interface PromoteOptions extends RequestSignalOption {
   toTier: MemoryTier;
+  user?: string;
+  session?: string;
 }
+
+/** `demote()` request options — `toTier` defaults to `"stm"` (the only demotion target). */
+export interface DemoteOptions extends RequestSignalOption {
+  toTier?: MemoryTier;
+  user?: string;
+  session?: string;
+}
+
+/** `update()`/`delete()` request options — private-plane `user`/`session` name the η partition. */
+export interface UpdateOptions extends RequestSignalOption {
+  user?: string;
+  session?: string;
+}
+
+export type DeleteOptions = UpdateOptions;
 
 /**
  * The `context` sub-client — `discover` only this phase (see `./models/context.ts` module
@@ -695,35 +709,107 @@ export class MemoryClient {
     return memoryResponseSchema.parse(response.jsonBody);
   }
 
-  // ---- lifecycle (TO BUILD, build-queue item 5 — honest 501, never a silent no-op) ----
+  // ---- targeted lifecycle verbs (build-queue item 5 — now REAL over real machinery) ----
 
   /**
-   * `POST /v1/memories/{id}/promote` (api-mcp-surface-spec.md §4.3b) is DESIGNED but has NO
-   * engine-side implementation anywhere in the tree yet. This is the wire twin of that exact
-   * honesty: throws the NAMED `SurfaceVerbNotImplementedError` (`statusCode=501`) immediately,
-   * with NO network call — there is nothing on the other end to call yet. Never a silent no-op or
-   * a partial success (design §2.5, DEV-STANDARDS rule 8). Return type is annotated
-   * `MemoryWriteResult` (the receipt shape `SDK-BUILD-DECISIONS.md` Decision B already assigns for
-   * when this DOES get built) purely for future signature stability; this method never actually
-   * returns.
+   * `POST /v1/memories/{id}/promote` — TARGETED single-memory promotion, now a REAL op
+   * (build-queue item 5 landed): the engine LOCATES the item and runs the real promotion path
+   * (`PromotionService` copy-on-write STM->MTM / `DistillPipeline` MTM->LTM leg). `toTier` is
+   * `"mtm"` (STM->MTM) or `"ltm"` (MTM->LTM). A nonexistent id maps to `NotFoundError` (404); an
+   * invalid `toTier` to a 400. Returns the canonical `MemoryVerbResult`. Private-plane —
+   * `user`/`session` name the η partition, validated like `get()`'s.
    */
-  async promote(memoryId: string, options: PromoteOptions): Promise<MemoryWriteResult> {
-    throw new SurfaceVerbNotImplementedError(
-      `MemoryClient#promote(memoryId=${JSON.stringify(memoryId)}, toTier=${JSON.stringify(options.toTier)}) is not implemented: no engine/wire counterpart exists yet (build-queue item 5). Use recall()/get() plus a manual add() until this lands.`,
-      { statusCode: 501 },
+  async promote(memoryId: string, options: PromoteOptions): Promise<MemoryVerbResult> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
     );
+    const body: Record<string, unknown> = { to_tier: options.toTier };
+    if (options.user !== undefined) body.user = options.user;
+    if (options.session !== undefined) body.session = options.session;
+    const response = await this._execute("POST", `/v1/memories/${memoryId}/promote`, {
+      jsonBody: body,
+      signal: options.signal,
+    });
+    return memoryVerbResultSchema.parse(response.jsonBody);
   }
 
   /**
-   * See `promote()` — the identical honest-`501` twin for the opposite tier transition
-   * (`POST /v1/memories/{id}/demote`), same reasoning, same NAMED error, same NO-network-call
-   * discipline.
+   * `POST /v1/memories/{id}/demote` — TARGETED MTM->STM tier-down, now REAL (reuses
+   * `DemotionService._demote_one`'s write-ahead-then-remove sequence). `toTier` defaults to
+   * `"stm"`. Same 404/400 semantics + private-plane discipline as `promote()`.
    */
-  async demote(memoryId: string, options: PromoteOptions): Promise<MemoryWriteResult> {
-    throw new SurfaceVerbNotImplementedError(
-      `MemoryClient#demote(memoryId=${JSON.stringify(memoryId)}, toTier=${JSON.stringify(options.toTier)}) is not implemented: no engine/wire counterpart exists yet (build-queue item 5). Use recall()/get() plus a manual add() until this lands.`,
-      { statusCode: 501 },
+  async demote(memoryId: string, options: DemoteOptions = {}): Promise<MemoryVerbResult> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
     );
+    const body: Record<string, unknown> = { to_tier: options.toTier ?? "stm" };
+    if (options.user !== undefined) body.user = options.user;
+    if (options.session !== undefined) body.session = options.session;
+    const response = await this._execute("POST", `/v1/memories/${memoryId}/demote`, {
+      jsonBody: body,
+      signal: options.signal,
+    });
+    return memoryVerbResultSchema.parse(response.jsonBody);
+  }
+
+  /**
+   * `PUT /memories/{id}` — SUPERSEDE the memory with `newContent` (invalidate-don't-delete): the
+   * engine INGESTs the new version and marks the old one `superseded_by` it via the SAME
+   * `invalidate` the conflict path uses. Returns the NEW memory (`memory_id` = new id,
+   * `superseded_id` = old id). 404 if the id is resident in no tier; private-plane.
+   */
+  async update(
+    memoryId: string,
+    newContent: string,
+    options: UpdateOptions = {},
+  ): Promise<MemoryVerbResult> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
+    );
+    const body: Record<string, unknown> = { new_content: newContent };
+    if (options.user !== undefined) body.user = options.user;
+    if (options.session !== undefined) body.session = options.session;
+    const response = await this._execute("PUT", `/memories/${memoryId}`, {
+      jsonBody: body,
+      signal: options.signal,
+    });
+    return memoryVerbResultSchema.parse(response.jsonBody);
+  }
+
+  /**
+   * `DELETE /memories/{id}?user=&session=` — soft-delete (invalidate-don't-delete): MTM/LTM flip
+   * to `state=expired` + `invalid_at` (kept in bi-temporal history, dropped from active recall);
+   * STM (ephemeral) is evicted. NEVER a hard delete of active data. `user`/`session` are query
+   * params (a DELETE carries no body). 404 if resident in no tier; private-plane.
+   */
+  async delete(memoryId: string, options: DeleteOptions = {}): Promise<MemoryVerbResult> {
+    validatePlaneFields(
+      { user: options.user, session: options.session },
+      {
+        privateConfigured: this.#privatePlaneConfigured,
+        sharedConfigured: this.#sharedPlaneConfigured,
+      },
+    );
+    const params: Record<string, string> = {};
+    if (options.user !== undefined) params.user = options.user;
+    if (options.session !== undefined) params.session = options.session;
+    const response = await this._execute("DELETE", `/memories/${memoryId}`, {
+      params: Object.keys(params).length > 0 ? params : undefined,
+      signal: options.signal,
+    });
+    return memoryVerbResultSchema.parse(response.jsonBody);
   }
 
   /**
