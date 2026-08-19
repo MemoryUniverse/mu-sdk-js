@@ -478,6 +478,15 @@ export class MemoryClient {
       const body: Record<string, unknown> = { content };
       if (options.user !== undefined) body.user = options.user;
       if (options.session !== undefined) body.session = options.session;
+      // `importance_score` is now honoured by the real mu-engine-server route (it threads to
+      // `SurfaceFacade.add` -> the `DeterministicPromoteStage` importance>=threshold gate). The
+      // route used to DROP it, so sending it was a no-op and omitting it here meant no TS SDK
+      // caller could ever get a memory promoted into MTM over the wire. Sent only when supplied,
+      // so a caller that passes none still produces a byte-identical body to before — and this
+      // keeps the TS twin wire-identical to mu-sdk-python's own include-set.
+      if (options.importanceScore !== undefined) {
+        body.importance_score = options.importanceScore;
+      }
       const response = await this._execute("POST", "/memories", {
         jsonBody: body,
         signal: options.signal,

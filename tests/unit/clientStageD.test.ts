@@ -290,7 +290,14 @@ describe("MemoryClient#add — R3 reconciliation", () => {
     }
   });
 
-  it("mode=local_server never sends tier/importance_score/visibility/subject/predicate/object/metadata (would 422 extra_forbidden on the real server)", async () => {
+  it("mode=local_server sends importance_score but still never sends tier/visibility/subject/predicate/object/metadata (those would 422 extra_forbidden on the real server)", async () => {
+    // CONTRACT CHANGE, deliberate: `importance_score` MOVED from the excluded set into the wire
+    // body once the real mu-engine-server route started honouring it (it now threads to
+    // `SurfaceFacade.add` -> the `DeterministicPromoteStage` importance>=threshold gate). While
+    // the route dropped it, sending it was a pointless no-op AND omitting it meant no SDK caller
+    // could ever get a memory promoted into MTM over the wire. Everything else stays excluded:
+    // the real `AddRequest` still has no counterpart for tier/visibility/S/P/O/metadata, so those
+    // would genuinely 422 `extra_forbidden`. This test now pins BOTH halves of that boundary.
     const transport = transportWith(201, WRITE_RESULT_BODY);
     const client = new MemoryClient({
       mode: "local_server",
@@ -306,7 +313,28 @@ describe("MemoryClient#add — R3 reconciliation", () => {
         localMemoryId: "lm-1",
         metadata: { k: "v" },
       });
-      expect(transport.calls[0]?.jsonBody).toEqual({ content: "hello" });
+      expect(transport.calls[0]?.jsonBody).toEqual({
+        content: "hello",
+        importance_score: 0.9,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("mode=local_server omits importance_score entirely when the caller does not supply one", async () => {
+    // Backward compatibility guard: a caller that passes no `importanceScore` must still produce
+    // a byte-identical body to the pre-change one (no explicit null, no default injected).
+    const transport = transportWith(201, WRITE_RESULT_BODY);
+    const client = new MemoryClient({
+      mode: "local_server",
+      endpoint: "http://unit-test.invalid",
+      auth: FAKE_AUTH,
+      transport,
+    });
+    try {
+      await client.add("hello", { user: "u1" });
+      expect(transport.calls[0]?.jsonBody).toEqual({ content: "hello", user: "u1" });
     } finally {
       await client.close();
     }
