@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/MemoryUniverse/mu-sdk-js/security/advisories/new
+    about: Report privately. Never in a public issue.
+  - name: How to contribute, and what CI runs
+    url: https://github.com/MemoryUniverse/mu-sdk-js/blob/HEAD/.github/CONTRIBUTING.md
+    about: Setup, the four gate commands, and why the integration tier does not run in CI.
+  - name: mu-sdk-python — the Python SDK
+    url: https://github.com/MemoryUniverse/mu-sdk-python
+    about: Same wire surface, other language. A wire change usually belongs in both.

@@ -1,0 +1,154 @@
+# mu-sdk-js CI — the gates that exist, run the way a contributor runs them.
+#
+# The Node half of this file is the simple one: check out, `npm ci`, run the four scripts
+# package.json already defines. Every command below was run against a clean clone on Node 20 before
+# this file was written, and every one exited 0.
+#
+# WHY A NODE REPO CHECKS OUT TWO PYTHON REPOS AND INSTALLS uv.
+#   This package is described in the design set as "the TS twin GENERATED FROM mu-contracts
+#   OpenAPI". It is not generated — it is hand-maintained zod modules mirroring the same shapes,
+#   and for a long time NOTHING verified the mirror. mu-core now has that verification
+#   (`scripts/wire_contract.py check-sdks`), but mu-core's CI does not run on a push to THIS repo:
+#   a PR here that renames a field, retypes one, or invents one would merge green and only be
+#   caught on mu-core's next commit — by someone who did not write it. The gate has to run on the
+#   side that changes, so it runs here, against mu-core's contract, on every push and PR.
+#
+#   It is cheap: the checker is a stdlib `ast`/regex parser whose only third-party import is
+#   pydantic, so it runs under `uv run --no-project --with 'pydantic>=2.9,<3'` — no mu-core
+#   install, no engine tree, no torch. MEASURED green in exactly that bare environment.
+#   `mu-sdk-python` is checked out too because `check-sdks` compares BOTH SDKs in one pass and
+#   treats an absent sibling as a FAILURE — which is the property that makes it a gate rather than
+#   a decoration that skips when it is inconvenient.
+#
+# NOT run here, and why (see .github/CONTRIBUTING.md § "The integration tier"): `npm run
+# test:integration` drives this client against the Python conformance server and the engine-server,
+# which live in *other repositories* and need a full Python environment for the SERVER side, not
+# just a parser. Standing those up is worth doing, and doing badly would mean a second, half-real
+# conformance surface that disagrees with the first. Until that is built properly the integration
+# tier runs locally and on the dev VM, and this file says so instead of pretending the unit tier
+# covers the wire.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "dev/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.8.13"
+  # mu-core's INTEGRATION trunk, which is not its GitHub default branch (`main` is behind it).
+  # The contract this SDK mirrors is the one on that trunk.
+  MU_CORE_REF: dev/mlm-build
+  # The Python twin's trunk, same reasoning.
+  MU_SDK_PY_REF: dev/sdk-build
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Must land at $GITHUB_WORKSPACE/mu-sdk-js: `scripts/wire_contract.py` addresses the SDKs as
+      # `<mu-core>/../mu-sdk-js/src/models` and `<mu-core>/../mu-sdk-python/src/mu_sdk/models`.
+      - name: Checkout mu-sdk-js
+        uses: actions/checkout@v7
+        with:
+          path: mu-sdk-js
+
+      - name: Checkout mu-core (the contract this package mirrors)
+        uses: actions/checkout@v7
+        with:
+          repository: MemoryUniverse/mu-core
+          ref: ${{ env.MU_CORE_REF }}
+          path: mu-core
+
+      # Source-only, read as text by the checker. Never installed, never imported.
+      - name: Checkout mu-sdk-python (the other SDK the drift checker compares)
+        uses: actions/checkout@v7
+        with:
+          repository: MemoryUniverse/mu-sdk-python
+          ref: ${{ env.MU_SDK_PY_REF }}
+          path: mu-sdk-python
+
+      # Node 20 is this package's declared floor (`engines.node: ">=20"`), and the floor is the
+      # version worth gating on: it is the one a consumer can be on that we might otherwise break.
+      # Widening this to a matrix is worth doing — but only once each added version has actually
+      # been run, not because a matrix looks thorough.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mu-sdk-js/package-lock.json
+
+      # `npm ci`, never `npm install`: it installs exactly package-lock.json and fails if the lock
+      # and package.json disagree — which is itself a defect worth failing on.
+      - name: Install (locked)
+        working-directory: mu-sdk-js
+        run: npm ci
+
+      # `biome check` is lint AND format in one pass; there is no separate format gate to add.
+      - name: biome (lint + format)
+        if: ${{ !cancelled() }}
+        working-directory: mu-sdk-js
+        run: npm run lint
+
+      - name: tsc --noEmit (types)
+        if: ${{ !cancelled() }}
+        working-directory: mu-sdk-js
+        run: npm run typecheck
+
+      - name: vitest (unit)
+        if: ${{ !cancelled() }}
+        working-directory: mu-sdk-js
+        run: npm run test:unit
+
+      # A published SDK's build is a gate, not a release step: `tsup` emits the ESM bundle *and*
+      # the .d.ts, and a type error that only surfaces during declaration emit is invisible to
+      # `tsc --noEmit` on the source tree.
+      - name: tsup (build — bundle + type declarations)
+        if: ${{ !cancelled() }}
+        working-directory: mu-sdk-js
+        run: npm run build
+
+      - name: Install uv (for the SDK-drift gate only)
+        if: ${{ !cancelled() }}
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # THE SDK-DRIFT GATE. Every zod schema in src/models is compared, field by field and type
+      # kind by type kind, against the JSON-Schema mu-contracts generates. Response models must
+      # match exactly (both sides are `.strict()`, so an extra or a missing field is a real break);
+      # request models may be a subset but never a superset (an invented field is a hard 422).
+      # An absent sibling is a FAILURE, not a skip.
+      # MEASURED, mutation planted in src/models/memory.ts (one extra optional field on
+      # memoryResponseSchema): exit 1, "mu-sdk-js: MemoryResponse declares field(s) the contract
+      # does not: ['invented_by_the_ts_twin']".
+      - name: SDK drift vs mu-contracts (an absent sibling is a FAILURE, not a skip)
+        if: ${{ !cancelled() }}
+        working-directory: mu-core
+        run: uv run --no-project --with 'pydantic>=2.9,<3' python scripts/wire_contract.py check-sdks --verbose
+
+      # Default `if: success()` from here down: if the build failed there is nothing to list or
+      # upload, and a second red step about a missing directory only obscures the first.
+      - name: Show what was built
+        working-directory: mu-sdk-js
+        run: ls -l dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: mu-sdk-js/dist/
+          if-no-files-found: error
+          retention-days: 14

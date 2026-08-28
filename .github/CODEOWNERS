@@ -1,0 +1,18 @@
+# Code owners for mu-sdk-js.
+#
+# GitHub silently IGNORES an entry naming an account without write access here, and an ignored line
+# looks exactly like a working one — so only verified accounts are listed. Add teams
+# (@MemoryUniverse/<team>) once they exist; never add a name speculatively.
+
+*                  @TRextabat
+
+# The wire surface. A change here has to be mirrored in mu-sdk-python.
+/src/models/       @TRextabat
+/src/client.ts     @TRextabat
+/src/transport.ts  @TRextabat
+
+# Packaging, gates, and the one-runtime-dependency rule.
+/package.json      @TRextabat
+/package-lock.json @TRextabat
+/tsup.config.ts    @TRextabat
+/.github/          @TRextabat

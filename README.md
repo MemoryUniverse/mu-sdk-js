@@ -60,8 +60,13 @@ available.
 
 ## Quickstart
 
-`mu-sdk-js` is not on npm yet (the package name will be `mu-sdk`). It has no dependency on the rest
-of the workspace, so it builds standalone:
+`mu-sdk-js` is not on npm yet. The name `mu-sdk` is unclaimed on the npm registry (unlike PyPI,
+where `mu-sdk` belongs to an unrelated 2016 project — see
+[`mu-sdk-python`](https://github.com/MemoryUniverse/mu-sdk-python)'s README), so no rename is
+forced here. It has no dependency on the rest of the workspace, so it installs standalone by
+either route.
+
+**Route 1 — clone and build:**
 
 ```bash
 git clone https://github.com/MemoryUniverse/mu-sdk-js
@@ -70,22 +75,44 @@ npm install
 npm run build              # emits dist/index.js — there is no published package to install
 ```
 
+**Route 2 — install straight from git into your own project:**
+
+```bash
+npm install github:MemoryUniverse/mu-sdk-js
+```
+
+`dist/` is not committed, so this only works because `package.json` declares
+`"prepare": "npm run build"` — npm runs it after cloning a git dependency, which compiles `dist/`
+in place. Without that hook the install "succeeds" and leaves you with a package whose only files
+are `package.json`, `README.md` and `LICENSE`, and `import { MemoryClient } from "mu-sdk"` fails to
+resolve.
+
 The client needs something that speaks the Memory Universe wire contract, and a credential for it.
 The shortest real path to both is `mu-core`'s open reference server, which mints a local bearer
 token for you:
 
 ```bash
+git clone -b dev/mlm-build https://github.com/MemoryUniverse/mu-core
 cd mu-core/packages/mu-engine-server
 make up          # mints ~/.memory-universe/engine-server.token, then brings the stack up on :8300
 ```
+
+**`-b dev/mlm-build` is not optional.** GitHub's default branch on `mu-core` is `main`, and
+`packages/mu-engine-server/` **does not exist on `main`** — a default-branch clone gets you
+`cd: no such file or directory` where a server should be. (`main` is stale in the same way for the
+Python side: its `mu_contracts.contracts` package is an empty scaffold, so a `main` clone installs
+cleanly and then raises `ModuleNotFoundError` on first import. See
+[`mu-sdk-python`](https://github.com/MemoryUniverse/mu-sdk-python)'s README.) `dev/mlm-build` is
+`mu-core`'s trunk; landing it on `main` is the real fix and is the repository owner's call.
 
 Use `make up`, not a bare `docker compose up`: every route but `/health` is bearer-authenticated,
 and `mint-token` is a prerequisite of `up`. Skipping it gets you a healthy server that `401`s
 everything.
 
-Then point the SDK at it. `mode: "local_server"` auto-loads that token from disk. Because nothing
-is published to npm yet, import from the build output (or `npm link` the package into your project
-first — the bare specifier `"mu-sdk"` will not resolve on its own):
+Then point the SDK at it. `mode: "local_server"` auto-loads that token from disk. If you took
+Route 2 above, the bare specifier `"mu-sdk"` resolves and you can `import { MemoryClient } from
+"mu-sdk"`. Inside a Route 1 clone there is no registry entry to resolve, so import from the build
+output (or `npm link` the package into your project first):
 
 ```ts
 import { MemoryClient } from "./dist/index.js";
@@ -98,7 +125,7 @@ const client = new MemoryClient({
 await client.add("The staging DB migration runs Tuesdays at 02:00 UTC.");
 const result = await client.recall("when does the migration run?");
 for (const item of result.items) {
-  console.log(item.score, item.content);
+  console.log(item.fused_score, item.content);
 }
 ```
 

@@ -3,6 +3,21 @@
   "version": "0.1.0",
   "description": "Memory Universe — JavaScript/TypeScript developer SDK (async wire client: add/search/recall(tier)/get/buildContext/share/promote/demote/consolidate/ask/context.discover). Server-only (mode=local_server|remote); mirrors mu-sdk-python's wire surface. Stage D: SdkConfig construction, token auto-load, plane-gating.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/MemoryUniverse/mu-sdk-js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MemoryUniverse/mu-sdk-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MemoryUniverse/mu-sdk-js/issues"
+  },
+  "keywords": [
+    "memory",
+    "agent-memory",
+    "llm",
+    "sdk",
+    "memory-universe"
+  ],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -21,6 +36,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests",
     "lint:fix": "biome check --write src tests",
