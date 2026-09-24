@@ -53,6 +53,50 @@ env:
   MU_SDK_PY_REF: dev/sdk-build
 
 jobs:
+  # THE SDK-DRIFT GATE, AS ITS OWN CHECK. It runs inside `gates` too, but there it sits behind
+  # `npm ci`, biome, tsc, vitest and tsup: the day any of those goes red, the one gate that
+  # protects the WIRE is reported as part of a red job rather than on its own. That already
+  # happened in the two sibling repos — mu-core run 33192194234 and mu-sdk-python run 33192202356
+  # both had every drift step GREEN inside a RED job. A separate job is also the only shape that
+  # can be made a required check on its own.
+  #
+  # It installs no Node and no mu-core: the checker is a stdlib ast/regex parser whose only
+  # third-party import is pydantic.
+  sdk-drift:
+    name: sdk-drift (this SDK vs mu-contracts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Must land at $GITHUB_WORKSPACE/mu-sdk-js: the checker addresses the SDKs as
+      # `<mu-core>/../mu-sdk-js/src/models` and `<mu-core>/../mu-sdk-python/src/mu_sdk/models`.
+      - name: Checkout mu-sdk-js
+        uses: actions/checkout@v7
+        with:
+          path: mu-sdk-js
+
+      - name: Checkout mu-core (the contract this package mirrors)
+        uses: actions/checkout@v7
+        with:
+          repository: MemoryUniverse/mu-core
+          ref: ${{ env.MU_CORE_REF }}
+          path: mu-core
+
+      - name: Checkout mu-sdk-python (the other SDK the checker compares)
+        uses: actions/checkout@v7
+        with:
+          repository: MemoryUniverse/mu-sdk-python
+          ref: ${{ env.MU_SDK_PY_REF }}
+          path: mu-sdk-python
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: SDK drift vs mu-contracts (an absent sibling is a FAILURE, not a skip)
+        working-directory: mu-core
+        run: uv run --no-project --with 'pydantic>=2.9,<3' python scripts/wire_contract.py check-sdks --verbose
+
   gates:
     name: gates
     runs-on: ubuntu-latest

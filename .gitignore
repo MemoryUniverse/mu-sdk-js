@@ -20,3 +20,6 @@ coverage/
 .serena/
 logs/
 *.log
+
+# session-local agent data
+.claude/
