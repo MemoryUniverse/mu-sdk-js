@@ -164,6 +164,15 @@ export const recallItemViewSchema = z
     rerank_score: z.number().nullable().optional(),
     is_floor: z.boolean().default(false),
     artifact_ref: z.string().nullable().optional(),
+    // S1b (ADR 0053, AD-233): the neighbour-expansion attribution pair the Python contract
+    // gained in mu-core@a7967a6. This schema is `.strict()`, so until these existed here the
+    // SDK RAISED on a perfectly valid server response — the exact failure the SDK-drift gate
+    // (`packages/mu-contracts/tests/test_sdk_wire_parity.py::test_ts_sdk_has_not_drifted`)
+    // exists to catch. It had been red since that commit; found by the ADR 0058 verify pass,
+    // which ran mu-core's full suite on the VM for the first time since.
+    // Both default to the values every pre-existing caller already observed (null / false).
+    turn_seq: z.number().int().nullable().optional(),
+    is_neighbor: z.boolean().default(false),
   })
   .strict();
 
